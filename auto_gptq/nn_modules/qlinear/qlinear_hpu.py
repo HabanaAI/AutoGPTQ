@@ -36,6 +36,8 @@ class QuantLinear(nn.Module):
         trainable=False,
         weight_dtype=torch.float16,
     ):
+        print(f"in qlinear_hpu : QuantLinear::__init__")
+        print(f"__init__ {bits=}, {group_size=}, {infeatures=}, {outfeatures=}, {bias=}, {use_cuda_fp16=}, {kernel_switch_threshold=}, {trainable=}, {weight_dtype=}")
         super().__init__()
         # global _autogptq_cuda_available
         if bits not in [2, 3, 4, 8]:
@@ -201,6 +203,8 @@ class QuantLinear(nn.Module):
         self.qzeros = torch.from_numpy(qzeros)
 
     def forward(self, x):
+        print(f"forward {x.shape=}")
+        print(f"forward {self.scales=} {self.qzeros=}")
         x_dtype = x.dtype
         out_shape = x.shape[:-1] + (self.outfeatures,)
         x = x.reshape(-1, x.shape[-1])
@@ -294,14 +298,39 @@ class QuantLinear(nn.Module):
             if self.wf.device != self.qzeros.device:
                 self.wf = self.wf.to(self.qzeros.device)
 
-            if False: # self.bits in [4]:
+            if self.bits in [4]:
                 # zeros = torch.bitwise_right_shift(
                 #     torch.unsqueeze(self.qzeros, 2).expand(-1, -1, 32 // self.bits),
                 #     self.wf.unsqueeze(0),
                 # ).to(torch.int16 if self.bits == 8 else torch.int8)
+                print(f"forward {self.qweight.shape=} {self.scales.shape=} {self.qzeros.shape=} {x_dtype=}")
+                print(f"forward {self.qweight.dtype=} {self.scales.dtype=} {self.qzeros.dtype=} {x_dtype=}")
+                qweight = self.qweight
+                qzeros = self.qzeros
+                scales = self.scales
+                reshape_weight = True
+                reshape_scales_zeros = False
+                if reshape_weight:
+                    #RuntimeError: Common dimension sizes of matmul inputs should be the same. Got 4096 and 32768
+                    qweight = qweight.reshape(qweight.shape[-1], -1).contiguous()
+                    print(f"forward {qweight.shape=} {qweight.dtype=}")
+                if reshape_scales_zeros:
+                    #RuntimeError: Graph compile failed.
+                    # [13:29:57.521604][HABANA_NODE           ][error][tid:83EA] Output tensor and input tensor of model/0/q_proj/dequantize_4_bit_bf16/155_complex/reshape_2 doesn't match in elements' count ( 0 , 16777216 )
+                    # [13:29:57.521620][HABANA_NODE           ][error][tid:83EA] Node Validation Failed. Cannot create node model/0/q_proj/dequantize_4_bit_bf16/155_complex/reshape_2.
+                    # [13:29:57.521772][PASS_MANAGER          ][error][tid:83EA] Graph optimization failed! Got SynapseException: Invalid Node Params! Node name: model/0/q_proj/dequantize_4_bit_bf16/155_complex/reshape_2
+                    # qzeros = qzeros.reshape(qzeros.shape[-1], -1)
+                    # scales = scales.reshape(scales.shape[-1], -1)
+                    qzeros = qzeros.reshape(-1, qzeros.shape[-1]).contiguous()
+                    scales = scales.reshape(-1, scales.shape[-1]).contiguous()
+                    print(f"forward {scales.shape=} {qzeros.shape=}")
+                weight = torch.ops.hpu.convert_from_uint4(qweight, scales, qzeros, x_dtype)
+                print(f"QuantLinear::forward {x.shape=} {weight.shape=} {weight.shape[-1]//8=}")
+                weight = weight.reshape(-1, weight.shape[-1]//8)
+                print(f"QuantLinear::forward {weight.shape=}")
             else:
                 # if self.bits in [2, 8]:
-                if self.bits in [2, 4, 8]:
+                if self.bits in [2, 8]:
                     zeros = torch.bitwise_right_shift(
                         torch.unsqueeze(self.qzeros, 2).expand(-1, -1, 32 // self.bits),
                         self.wf.unsqueeze(0),
@@ -357,9 +386,10 @@ class QuantLinear(nn.Module):
                 weight = scales * (weight - zeros)
                 weight = weight.reshape(weight.shape[0] * weight.shape[1], weight.shape[2])
             out = torch.matmul(x, weight)
-        out = out.to(dtype=x_dtype).reshape(
-            out_shape
-        )  # A cast is needed here as for some reason the vecquant2matmul_faster_old still allocate a float32 output.
+            if self.bits not in [4]:
+                out = out.to(dtype=x_dtype).reshape(
+                    out_shape
+                )  # A cast is needed here as for some reason the vecquant2matmul_faster_old still allocate a float32 output.
         out = out + self.bias if self.bias is not None else out
         return out
 
