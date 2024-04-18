@@ -66,7 +66,6 @@ def dynamically_import_QuantLinear(
     use_qigen: bool = False,
     disable_marlin: bool = True,
 ):
-    # if use_hpu:
     try:
         import habana_frameworks.torch.hpu  # noqa: F401
     except ImportError as e:
