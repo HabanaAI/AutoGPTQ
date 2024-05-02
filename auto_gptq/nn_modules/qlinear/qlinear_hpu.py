@@ -70,8 +70,8 @@ class QuantLinear(nn.Module):
 
     def preprocessing(self):
         self.qweight = self.qweight.detach().clone().to('cpu')
-        self.qweight = self.qweight.reshape(self.qweight.shape[-1], -1).contiguous()
         self.qweight = self.qweight.to('hpu')
+
     def post_init(self):
         pass
 
@@ -172,7 +172,7 @@ class QuantLinear(nn.Module):
         out_shape = x.shape[:-1] + (self.outfeatures,)
         x = x.reshape(-1, x.shape[-1])
         weight = torch.ops.hpu.convert_from_uint4(self.qweight, self.scales, self.qzeros, x_dtype)
-        weight = weight.reshape(weight.shape[-1], -1).contiguous()
+        weight = weight.reshape(-1, weight.shape[-1]//8)
         out = torch.matmul(x, weight)
         out = out.to(dtype=x_dtype).reshape(
             out_shape
