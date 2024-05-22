@@ -2141,12 +2141,6 @@ class TestQ4HPU(unittest.TestCase):
                 "token": None #args.token,
             }
             model_q = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=model_dtype, quantization_config=quantization_config, **model_kwargs)
-            def run_preprocessing(model):
-                for name, mod in model.named_children():
-                    if hasattr(mod, "preprocessing"):
-                        mod.preprocessing()
-                    run_preprocessing(mod)
-            run_preprocessing(model_q)
             model_q = model_q.eval().to(device)
         except ValueError as e:
             if torch.version.hip:
