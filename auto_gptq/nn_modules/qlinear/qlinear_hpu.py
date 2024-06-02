@@ -9,20 +9,18 @@ import habana_frameworks.torch.core as htcore
 
 logger = getLogger(__name__)
 
-# packs tensor of int4/uint4 numbers into int32 elements
-def pack_1d(input):
-    packed_size = int(input.shape[-1] / 8)
-    packed = np.empty((packed_size,), dtype=int)
-    for b in range(packed_size):
-        base2 = ""
-        for i in range(8):
-            base2 = np.binary_repr(input[b * 8 + i], 4) + base2
-        packed[b] = int(base2, 2)
-    return packed
-
-def pack_int4_into_int32(input, out_shape):
-    input_flat = input.flatten()
-    return pack_1d(input_flat).reshape(out_shape)
+def pack_cuda_old_hpu(input, bits = 4):
+    normal = input.to(torch.int32)
+    q = torch.zeros((normal.shape[0], normal.shape[1] // 32 * bits), dtype=torch.int32)
+    i = 0
+    col = 0
+    while col < q.shape[1]:
+        for j in range(i, i + (32 // bits)):
+            q[:, col] |= normal[:, j] << (bits * (j - i))
+        i += 32 // bits
+        col += 1
+    q = q.to(torch.int32)
+    return q
 
 class QuantLinear(nn.Module):
     QUANT_TYPE = "hpu"
@@ -87,17 +85,11 @@ class QuantLinear(nn.Module):
     def _preprocessing(self):
         self.qweight = self.qweight.cpu()
         weight = self.unpack_weight_cuda()
-        new_qweight = pack_int4_into_int32(weight, self.qweight.shape)
+        new_qweight = pack_cuda_old_hpu(weight)
         new_qweight = torch.tensor(new_qweight, dtype=torch.int)
 
-        self.qzeros = self.qzeros.cpu()
-        zeros = self.unpack_zeros_cuda().to(torch.int32).cpu()
-        new_qzeros = pack_int4_into_int32(zeros, self.qzeros.shape)
-        new_qzeros = torch.tensor(new_qzeros, dtype=torch.int, device=torch.device('cpu'))
-        new_qweight = new_qweight.t()
-        self.qzeros = new_qzeros.to('hpu')
         self.qweight = new_qweight.to('hpu')
-
+        self.qzeros = self.qzeros + int("11111111", 16)
     def post_init(self):
         self._preprocessing()
 
@@ -199,7 +191,7 @@ class QuantLinear(nn.Module):
         x = x.reshape(-1, x.shape[-1])
         scales = self.scales
         qweight = self.qweight
-        zeros = self.zeros
+        zeros = self.qzeros
         weight = torch.ops.hpu.convert_from_int4(qweight, scales, zeros, x_dtype)
         out = torch.matmul(x, weight)
         out = out.to(dtype=x_dtype).reshape(
@@ -209,7 +201,6 @@ class QuantLinear(nn.Module):
         return out
 
     def unpack_zeros_cuda(self):
-        if self.bits in [2, 4, 8]:
         zeros = torch.bitwise_right_shift(
             torch.unsqueeze(self.qzeros, 2).expand(-1, -1, 32 // self.bits),
             self.wf.unsqueeze(0),
@@ -228,7 +219,7 @@ class QuantLinear(nn.Module):
                 self.wf.unsqueeze(-1),
             ).to(torch.int16 if self.bits == 8 else torch.int8)
         weight = torch.bitwise_and(weight, (2**self.bits) - 1)
-        weight = weight.reshape(-1, self.group_size, weight.shape[2])
+        weight = weight.reshape((weight.shape[0]*weight.shape[1], weight.shape[2]))
         return weight
 
 __all__ = ["QuantLinear"]
