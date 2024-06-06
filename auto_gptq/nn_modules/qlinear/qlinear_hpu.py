@@ -86,10 +86,12 @@ class QuantLinear(nn.Module):
         self.qweight = self.qweight.cpu()
         weight = self.unpack_weight_cuda()
         new_qweight = pack_cuda_old_hpu(weight)
-        new_qweight = torch.tensor(new_qweight, dtype=torch.int)
-
         self.qweight = new_qweight.to('hpu')
-        self.qzeros = self.qzeros + int("11111111", 16)
+
+        zeros = self.unpack_zeros_cuda().cpu()
+        new_qzeros = pack_cuda_old_hpu(zeros)
+        self.qzeros = new_qzeros.to('hpu')
+
     def post_init(self):
         self._preprocessing()
 
@@ -192,7 +194,7 @@ class QuantLinear(nn.Module):
         scales = self.scales
         qweight = self.qweight
         zeros = self.qzeros
-        weight = torch.ops.hpu.convert_from_int4(qweight, scales, zeros, x_dtype)
+        weight = torch.ops.hpu.convert_from_uint4(qweight, scales, zeros, x_dtype)
         out = torch.matmul(x, weight)
         out = out.to(dtype=x_dtype).reshape(
             out_shape
@@ -206,11 +208,11 @@ class QuantLinear(nn.Module):
             self.wf.unsqueeze(0),
         ).to(torch.int16 if self.bits == 8 else torch.int8)
 
+        zeros = zeros + 1
         zeros = torch.bitwise_and(
             zeros, (2**self.bits) - 1
         ).to(self.scales.dtype)  # NOTE: It appears that casting here after the `zeros = zeros + 1` is important.
-        zeros = zeros + 1
-        zeros = zeros.reshape(-1, 1, zeros.shape[1] * zeros.shape[2])
+        zeros = zeros.reshape(-1, zeros.shape[1] * zeros.shape[2])
         return zeros
 
     def unpack_weight_cuda(self):

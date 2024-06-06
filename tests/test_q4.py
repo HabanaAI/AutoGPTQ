@@ -2144,8 +2144,8 @@ class TestQ4HPU(unittest.TestCase):
             model_q = model_q.eval().to(device)
         except ValueError as e:
             if torch.version.hip:
-                self.assertTrue("Can not use Marlin int4*fp16 kernel with AMD ROCm" in e.text)
-                self.skipTest("Can not run this test on ROCm")
+                self.assertTrue("Can not use HPU int4 kernel" in e.text)
+                self.skipTest("Can not run this test on HPU")
             else:
                 raise e
         # from optimum-habana-fork/examples/text-generation/utils.py::setup_tokenizer
