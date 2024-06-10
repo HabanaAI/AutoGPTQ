@@ -9,7 +9,7 @@ import habana_frameworks.torch.core as htcore
 
 logger = getLogger(__name__)
 
-def pack_cuda_old_hpu(input, bits = 4):
+def pack_tensor(input, bits = 4):
     normal = input.to(torch.int32)
     q = torch.zeros((normal.shape[0], normal.shape[1] // 32 * bits), dtype=torch.int32)
     i = 0
@@ -84,12 +84,12 @@ class QuantLinear(nn.Module):
 
     def _preprocessing(self):
         self.qweight = self.qweight.cpu()
-        weight = self.unpack_weight_cuda()
-        new_qweight = pack_cuda_old_hpu(weight)
+        weight = self.unpack_weight_from_cuda_old_format()
+        new_qweight = pack_tensor(weight)
         self.qweight = new_qweight.to('hpu')
 
-        zeros = self.unpack_zeros_cuda().cpu()
-        new_qzeros = pack_cuda_old_hpu(zeros)
+        zeros = self.unpack_zeros_from_cuda_old_format().cpu()
+        new_qzeros = pack_tensor(zeros)
         self.qzeros = new_qzeros.to('hpu')
 
     def post_init(self):
@@ -196,13 +196,11 @@ class QuantLinear(nn.Module):
         zeros = self.qzeros
         weight = torch.ops.hpu.convert_from_uint4(qweight, scales, zeros, x_dtype)
         out = torch.matmul(x, weight)
-        out = out.to(dtype=x_dtype).reshape(
-            out_shape
-        )  # A cast is needed here as for some reason the vecquant2matmul_faster_old still allocate a float32 output.
+        out = out.reshape(out_shape)
         out = out + self.bias if self.bias is not None else out
         return out
 
-    def unpack_zeros_cuda(self):
+    def unpack_zeros_from_cuda_old_format(self):
         zeros = torch.bitwise_right_shift(
             torch.unsqueeze(self.qzeros, 2).expand(-1, -1, 32 // self.bits),
             self.wf.unsqueeze(0),
@@ -215,7 +213,7 @@ class QuantLinear(nn.Module):
         zeros = zeros.reshape(-1, zeros.shape[1] * zeros.shape[2])
         return zeros
 
-    def unpack_weight_cuda(self):
+    def unpack_weight_from_cuda_old_format(self):
         weight = torch.bitwise_right_shift(
                 torch.unsqueeze(self.qweight, 1).expand(-1, 32 // self.bits, -1),
                 self.wf.unsqueeze(-1),

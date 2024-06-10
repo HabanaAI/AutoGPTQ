@@ -56,23 +56,6 @@ def compare_tensors(hpu_tensors, cpu_tensors, atol, rtol, assert_enable=True):
                 equal_nan=True,
             )
 
-
-def test_1d_int():
-    out_dtype = torch.bfloat16
-    input = torch.full((4,), 0b00010010001101000101011001111000, dtype=torch.int).to("hpu")
-    scale = torch.full((4,), 2, dtype=out_dtype).to("hpu")
-    zero_point = torch.zeros((4,), dtype=out_dtype).to("hpu")
-    result = torch.ops.hpu.convert_from_int4(input, scale, zero_point, out_dtype).cpu().reshape(-1, 8)
-    print(result)
-
-def test_1d_uint():
-    out_dtype = torch.bfloat16
-    input = torch.full((4,), 0b00010010001101000101011001111000, dtype=torch.int).to("hpu")
-    scale = torch.full((4,), 2, dtype=out_dtype).to("hpu")
-    zero_point = torch.zeros((4,), dtype=out_dtype).to("hpu")
-    result = torch.ops.hpu.convert_from_uint4(input, scale, zero_point, out_dtype).cpu().reshape(-1, 8)
-    print(result)
-
 # taken from AutoGPTQ/tests/test_repacking.py
 def gen_quant4(k, n, groupsize=-1, bias=False):
     maxq = 2 ** 4 - 1
@@ -135,7 +118,8 @@ def test_qlinear_hpu(bits, group_size, infeatures, outfeatures, bias, scales_val
     kernel_switch_threshold = 128
     from auto_gptq.nn_modules.qlinear import qlinear_hpu, qlinear_cuda_old
     quant_hpu = qlinear_hpu.QuantLinear(bits=bits, group_size=group_size, infeatures=infeatures, outfeatures=outfeatures, bias=bias, use_cuda_fp16=use_cuda_fp16, kernel_switch_threshold=kernel_switch_threshold, trainable=trainable, weight_dtype=weight_dtype).to("hpu")
-    quant_ref = qlinear_cuda_old.QuantLinear(bits=bits, group_size=group_size, infeatures=infeatures, outfeatures=outfeatures, bias=bias, use_cuda_fp16=use_cuda_fp16, kernel_switch_threshold=kernel_switch_threshold, trainable=trainable, weight_dtype=weight_dtype)
+    # Cuda old implementation is the reference, also runs on hpu
+    quant_ref_cuda_old = qlinear_cuda_old.QuantLinear(bits=bits, group_size=group_size, infeatures=infeatures, outfeatures=outfeatures, bias=bias, use_cuda_fp16=use_cuda_fp16, kernel_switch_threshold=kernel_switch_threshold, trainable=trainable, weight_dtype=weight_dtype).to("hpu")
     input = torch.rand((infeatures, outfeatures), dtype=weight_dtype).to("hpu")
     _, linear, s = gen_quant4(infeatures, outfeatures, group_size, bias)
 
@@ -176,17 +160,17 @@ def test_qlinear_hpu(bits, group_size, infeatures, outfeatures, bias, scales_val
     htcore.mark_step()
     quant_hpu.to("hpu")
 
-    quant_ref.pack(linear, s.clone().detach().T, zeros.clone().detach().T, g_idx=None)
+    quant_ref_cuda_old.pack(linear, s.clone().detach().T, zeros.clone().detach().T, g_idx=None)
     htcore.mark_step()
-    quant_ref.to("hpu")
+    quant_ref_cuda_old.to("hpu")
 
-    out_ref = quant_ref(input)
+    out_ref_cuda_old = quant_ref_cuda_old(input)
     htcore.mark_step()
     quant_hpu.post_init()
     htcore.mark_step()
     out_hpu = quant_hpu(input)
     htcore.mark_step()
 
-    out_ref = out_ref.cpu()
+    out_ref_cuda_old = out_ref_cuda_old.cpu()
     out_hpu = out_hpu.cpu()
-    compare_tensors(out_hpu.cpu(), out_ref.cpu(), rtol = 1e-05, atol = 1e-08)
+    compare_tensors(out_hpu.cpu(), out_ref_cuda_old.cpu(), rtol = 1e-05, atol = 1e-08)
