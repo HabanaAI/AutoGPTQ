@@ -9,10 +9,10 @@ from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
 import habana_frameworks.torch.core as htcore
 
 
-# try:
-#     from exllama_kernels import prepare_buffers, set_tuning_params
-# except ImportError as e:
-#     print(f"[WARNING] Could not load exllama_kernels: {e}")
+try:
+    from exllama_kernels import prepare_buffers, set_tuning_params
+except ImportError as e:
+    print(f"[WARNING] Could not load exllama_kernels: {e}")
 
 from transformers import AutoTokenizer
 
@@ -2135,7 +2135,7 @@ class TestQ4HPU(unittest.TestCase):
 
         try:
             from transformers import GPTQConfig, AutoModelForCausalLM
-            quantization_config = GPTQConfig(bits=4, disable_exllama=True)
+            quantization_config = GPTQConfig(bits=4, use_exllama=False)
             model_kwargs = {
                 "revision": "main", #args.model_revision,
                 "token": None #args.token,
