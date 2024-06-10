@@ -2089,7 +2089,7 @@ class TestQ4Marlin(unittest.TestCase):
         # TheBloke/Llama-2-7B-Chat-GPTQ has bias, but they are all zeros, use a checkpoint which really uses bias.
         model_id = "s3nh/starcoderbase-1b-GPTQ"
         try:
-            model_q = AutoGPTQForCausalLM.from_quantized(model_id, device=device, use_marlin=True)
+            model_q = AutoGPTQForCausalLM.from_quantized(model_id, device="cuda:0", use_marlin=True)
         except ValueError as e:
             if torch.version.hip:
                 self.assertTrue("Can not use Marlin int4*fp16 kernel with AMD ROCm" in e.text)
@@ -2183,4 +2183,74 @@ class TestQ4HPU(unittest.TestCase):
         predicted_text = tokenizer.decode(res[0])
 
         self.assertEqual(predicted_text, reference_output)
+
+    @parameterized.expand(
+        [
+            ("hpu", torch.bfloat16),
+            ("hpu", torch.float),
+        ]
+    )
+    def test_bias(self, in_device, model_dtype):
+        device = torch.device(in_device)
+        # TheBloke/Llama-2-7B-Chat-GPTQ has bias, but they are all zeros, use a checkpoint which really uses bias.
+        model_id = "s3nh/starcoderbase-1b-GPTQ"
+        try:
+            model_kwargs = {
+                "revision": "main", #args.model_revision,
+                "token": None #args.token,
+            }
+            model_q = AutoGPTQForCausalLM.from_quantized(model_id, torch_dtype=model_dtype, use_marlin=False, **model_kwargs)
+            model_q = model_q.eval().to(device)
+        except ValueError as e:
+            if torch.version.hip:
+                self.assertTrue("Can not use HPU int4 kernel" in e.text)
+                self.skipTest("Can not run this test on HPU")
+            else:
+                raise e
+
+        for _, param in model_q.named_parameters():
+            self.assertTrue(param.device != torch.device("meta"))
+
+        for _, param in model_q.named_buffers():
+            self.assertTrue(param.device != torch.device("meta"))
+
+        self.assertTrue(torch.count_nonzero(model_q.model.transformer.h[0].attn.c_proj.bias) > 0)
+        self.assertTrue(torch.count_nonzero(model_q.model.transformer.h[0].attn.c_attn.bias) > 0)
+
+        # from optimum-habana-fork/examples/text-generation/utils.py::setup_tokenizer
+        tokenizer_kwargs = {
+            "revision": "main", #args.model_revision,
+            "token": None #args.token,
+        }
+        tokenizer = AutoTokenizer.from_pretrained("Xenova/starcoderbase-1b", **tokenizer_kwargs)
+
+        if True: # from optimum-habana-fork/examples/text-generation/utils.py::setup_tokenizer
+            if not model_q.config.is_encoder_decoder:
+                tokenizer.padding_side = "left"
+            # Some models like GPT2 do not have a PAD token so we have to set it if necessary
+            if model_q.config.model_type == "llama":
+                # unwind broken decapoda-research config
+                model_q.generation_config.pad_token_id = 0
+                model_q.generation_config.bos_token_id = 1
+                model_q.generation_config.eos_token_id = 2
+                tokenizer.bos_token_id = model_q.generation_config.bos_token_id
+                tokenizer.eos_token_id = model_q.generation_config.eos_token_id
+                tokenizer.pad_token_id = model_q.generation_config.pad_token_id
+                tokenizer.pad_token = tokenizer.decode(tokenizer.pad_token_id)
+                tokenizer.eos_token = tokenizer.decode(tokenizer.eos_token_id)
+                tokenizer.bos_token = tokenizer.decode(tokenizer.bos_token_id)
+
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+                model_q.generation_config.pad_token_id = model_q.generation_config.eos_token_id
+
+        prompt = "Today I am in Paris and"
+        inp = tokenizer(prompt, return_tensors="pt").to(device)
+
+        res = model_q.generate(**inp, num_beams=1, min_new_tokens=60, max_new_tokens=60)
+
+        predicted_text = tokenizer.decode(res[0])
+
+        self.assertTrue(predicted_text.startswith("Today I am in Paris and I am a student of the Master's"))
+
 
