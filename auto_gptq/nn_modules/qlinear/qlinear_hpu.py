@@ -18,6 +18,7 @@ except Exception as e:
 
     convert_from_uint4 = error_raiser_hpu
 
+
 logger = getLogger(__name__)
 
 def pack_tensor(input, bits = 4):
