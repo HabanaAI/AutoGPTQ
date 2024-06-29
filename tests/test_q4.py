@@ -2205,6 +2205,11 @@ class TestQ4HPU(unittest.TestCase):
         ]
     )
     def test_generation(self, in_device, model_dtype):
+        try:
+            import habana_frameworks.torch.core as htcore
+        except Exception as e:
+            self.skipTest("Couldn't import HPU plugin, skipping HPU tests")
+
         # Reference generated with the cuda-old kernel and TheBloke/Llama-2-7B-Chat-GPTQ
         reference_output = "<s> I am in Paris and I am feeling very sad and lonely. everybody I know is busy and I don't have any friends here. I am staying in a small apartment in the 11th arrondissement and I am feeling very isolated. I miss my friends and family back home and I don'"
 
@@ -2270,6 +2275,11 @@ class TestQ4HPU(unittest.TestCase):
         ]
     )
     def test_bias(self, in_device, model_dtype):
+        try:
+            import habana_frameworks.torch.core as htcore
+        except Exception as e:
+            self.skipTest("Couldn't import HPU plugin, skipping HPU tests")
+
         device = torch.device(in_device)
         # TheBloke/Llama-2-7B-Chat-GPTQ has bias, but they are all zeros, use a checkpoint which really uses bias.
         model_id = "s3nh/starcoderbase-1b-GPTQ"
