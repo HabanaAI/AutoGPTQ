@@ -7,7 +7,6 @@ from auto_gptq.nn_modules.qlinear.qlinear_exllama import QuantLinear
 from auto_gptq.nn_modules.qlinear.qlinear_marlin import QuantLinear as MarlinQuantLinear
 from auto_gptq.nn_modules.qlinear.qlinear_tritonv2 import QuantLinear as TritonV2QuantLinear
 from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
-import habana_frameworks.torch.core as htcore
 
 
 try:
