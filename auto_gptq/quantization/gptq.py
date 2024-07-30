@@ -9,6 +9,10 @@ import transformers
 
 from .quantizer import Quantizer
 
+from ..utils.import_utils import (
+    HPU_AVAILABLE,
+)
+
 
 logger = getLogger(__name__)
 
@@ -166,7 +170,11 @@ class GPTQ:
                 logger.debug(torch.sum((self.layer(self.inp1) - self.out1) ** 2))
                 logger.debug(torch.sum(Losses))
 
-        torch.cuda.synchronize()
+        if not HPU_AVAILABLE:
+            torch.cuda.synchronize()
+        else:
+            import habana_frameworks.torch.hpu as hpu
+            hpu.synchronize()
         logger.info(f"duration: {(time.time() - tick)}")
         logger.info(f"avg loss: {torch.sum(Losses).item() / self.nsamples}")
 
@@ -200,7 +208,8 @@ class GPTQ:
         self.H = None
         self.Losses = None
         self.Trace = None
-        torch.cuda.empty_cache()
+        if not HPU_AVAILABLE:
+            torch.cuda.empty_cache()
 
 
 __all__ = ["GPTQ"]
