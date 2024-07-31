@@ -9,10 +9,18 @@ from transformers import AutoTokenizer
 from auto_gptq import AutoGPTQForCausalLM
 from auto_gptq.quantization import CHECKPOINT_FORMAT, QUANT_CONFIG_FILENAME, BaseQuantizeConfig
 
+try:
+    import habana_frameworks.torch.core as htcore
+    HPU_AVAILABLE = True
+except Exception as e:
+    HPU_AVAILABLE = False
 
 class TestQuantization(unittest.TestCase):
     @parameterized.expand([(False,), (True,)])
     def test_quantize(self, use_marlin: bool):
+        if HPU_AVAILABLE and use_marlin:
+            return unittest.skip(reason="HPU does not support marlin.")
+
         pretrained_model_dir = "saibo/llama-1B"
 
         tokenizer = AutoTokenizer.from_pretrained(pretrained_model_dir, use_fast=True)
@@ -43,9 +51,11 @@ class TestQuantization(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdirname:
             model.save_pretrained(tmpdirname)
 
-            model = AutoGPTQForCausalLM.from_quantized(tmpdirname, device="cuda:0", use_marlin=use_marlin)
+            device = None if HPU_AVAILABLE else "cuda:0"
+            model = AutoGPTQForCausalLM.from_quantized(tmpdirname, device=device, use_marlin=use_marlin)
             del model
-            torch.cuda.empty_cache()
+            if not HPU_AVAILABLE:
+                torch.cuda.empty_cache()
 
             # test compat: 1) with simple dict type 2) is_marlin_format
             compat_quantize_config = {
@@ -54,11 +64,12 @@ class TestQuantization(unittest.TestCase):
                 "desc_act": False,
                 "is_marlin_format": use_marlin,
             }
-            model = AutoGPTQForCausalLM.from_quantized(tmpdirname, device="cuda:0", quantize_config=compat_quantize_config)
+            model = AutoGPTQForCausalLM.from_quantized(tmpdirname, device=device, quantize_config=compat_quantize_config)
             assert(isinstance(model.quantize_config, BaseQuantizeConfig))
 
             del model
-            torch.cuda.empty_cache()
+            if not HPU_AVAILABLE:
+                torch.cuda.empty_cache()
 
             # test checkinpoint_format hint to from_quantized()
             os.remove(f"{tmpdirname}/{QUANT_CONFIG_FILENAME}")
@@ -68,7 +79,7 @@ class TestQuantization(unittest.TestCase):
                 "group_size": 128,
                 "desc_act": False,
             }
-            model = AutoGPTQForCausalLM.from_quantized(tmpdirname, device="cuda:0",
+            model = AutoGPTQForCausalLM.from_quantized(tmpdirname, device=device,
                     quantize_config=compat_quantize_config,
                     checkpoint_format=CHECKPOINT_FORMAT.MARLIN if use_marlin else None)
             assert (isinstance(model.quantize_config, BaseQuantizeConfig))

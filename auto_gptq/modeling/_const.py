@@ -5,6 +5,7 @@ from ..utils.import_utils import compare_transformers_version
 
 CPU = device("cpu")
 CUDA_0 = device("cuda:0")
+HPU = device("hpu")
 
 SUPPORTED_MODELS = [
     "bloom",
@@ -49,4 +50,4 @@ if compare_transformers_version("v4.43.0.dev0", op="ge"):
 
 EXLLAMA_DEFAULT_MAX_INPUT_LENGTH = 2048
 
-__all__ = ["CPU", "CUDA_0", "SUPPORTED_MODELS", "EXLLAMA_DEFAULT_MAX_INPUT_LENGTH"]
+__all__ = ["CPU", "CUDA_0", "HPU", "SUPPORTED_MODELS", "EXLLAMA_DEFAULT_MAX_INPUT_LENGTH"]

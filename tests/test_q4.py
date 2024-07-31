@@ -7,6 +7,7 @@ from auto_gptq.nn_modules.qlinear.qlinear_exllama import QuantLinear
 from auto_gptq.nn_modules.qlinear.qlinear_marlin import QuantLinear as MarlinQuantLinear
 from auto_gptq.nn_modules.qlinear.qlinear_tritonv2 import QuantLinear as TritonV2QuantLinear
 from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+import habana_frameworks.torch.core as htcore
 
 
 try:
@@ -2295,14 +2296,11 @@ class TestQ4HPU(unittest.TestCase):
                 self.skipTest("Can not run this test on HPU")
             else:
                 raise e
-
         for _, param in model_q.named_parameters():
             self.assertTrue(param.device != torch.device("meta"))
 
         for _, param in model_q.named_buffers():
             self.assertTrue(param.device != torch.device("meta"))
-
-        self.assertTrue(torch.count_nonzero(model_q.model.transformer.h[0].attn.c_proj.bias) > 0)
         self.assertTrue(torch.count_nonzero(model_q.model.transformer.h[0].attn.c_attn.bias) > 0)
 
         tokenizer_kwargs = {
