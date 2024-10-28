@@ -52,6 +52,12 @@ except Exception as e:
     MARLIN_AVAILABLE = False
     MARLIN_EXCEPTION = e
 
+try:
+    import habana_frameworks.torch.hpu  # noqa: F401
+    HPU_AVAILABLE = True
+except Exception as e:
+    HPU_AVAILABLE = False
+
 
 logger = getLogger(__name__)
 
@@ -67,11 +73,7 @@ def dynamically_import_QuantLinear(
     use_marlin: bool = False,
     use_tritonv2: bool = False,
 ):
-    try:
-        import habana_frameworks.torch.hpu  # noqa: F401
-    except Exception as e:
-        pass
-    else:
+    if HPU_AVAILABLE:
         from ..nn_modules.qlinear.qlinear_hpu import QuantLinear
         return QuantLinear
     if use_qigen:

@@ -41,6 +41,7 @@ from ..utils.import_utils import (
     MARLIN_AVAILABLE,
     QIGEN_AVAILABLE,
     TRITON_AVAILABLE,
+    HPU_AVAILABLE,
     dynamically_import_QuantLinear,
 )
 from ..utils.marlin_utils import (
@@ -48,7 +49,7 @@ from ..utils.marlin_utils import (
     _validate_marlin_device_support,
     prepare_model_for_marlin_load,
 )
-from ._const import CPU, CUDA_0, SUPPORTED_MODELS
+from ._const import CPU, CUDA_0, HPU, SUPPORTED_MODELS
 from ._utils import (
     autogptq_post_init,
     find_layers,
@@ -75,6 +76,7 @@ logger.propagate = False
 logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
+device_to = CUDA_0 if not HPU_AVAILABLE else HPU
 
 def nested_move_to_device(v, device):
     if isinstance(v, torch.Tensor):
@@ -198,7 +200,7 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
                     logger.info(f"truly offloading {name} to cpu with hook.")
                     module = get_module_by_name_suffix(self.model, name)
                     remove_hook_from_module(module, recurse=True)
-                    accelerate.cpu_offload_with_hook(module, CUDA_0)
+                    accelerate.cpu_offload_with_hook(module, device_to)
 
         layer_inputs = []
         attention_masks = []
@@ -244,7 +246,7 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
 
         force_layer_back_to_cpu = False
         if get_device(layers[0]) == CPU:
-            layers[0] = layers[0].to(CUDA_0)
+            layers[0] = layers[0].to(device_to)
             force_layer_back_to_cpu = True
 
         ori_outside_layer_module_devices = {}
@@ -277,7 +279,8 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
             if module is not None:
                 move_to_device(module, ori_outside_layer_module_devices[module_name])
 
-        torch.cuda.empty_cache()
+        if not HPU_AVAILABLE:
+            torch.cuda.empty_cache()
 
         inside_layer_modules = self.inside_layer_modules
         if not self.quantize_config.true_sequential:
@@ -288,7 +291,7 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
             layer = layers[i]
             force_layer_back_to_cpu = False
             if get_device(layer) == CPU:
-                move_to_device(layer, CUDA_0)
+                move_to_device(layer, device_to)
                 force_layer_back_to_cpu = True
             cur_layer_device = get_device(layer)
 
@@ -372,7 +375,8 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
             del gptq
             del layer_inputs
             layer_inputs, layer_outputs = layer_outputs, []  # TODO: is it really OK to cache only the first positional argument?
-            torch.cuda.empty_cache()
+            if not HPU_AVAILABLE:
+                torch.cuda.empty_cache()
 
         pack_model(
             model=self.model,
@@ -393,7 +397,8 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
 
         self._quantized = True
 
-        torch.cuda.empty_cache()
+        if not HPU_AVAILABLE:
+            torch.cuda.empty_cache()
 
     @property
     def device(self):
@@ -597,8 +602,12 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
     ):
         """load un-quantized pretrained model to cpu"""
 
-        if not torch.cuda.is_available():
+        if not HPU_AVAILABLE and not torch.cuda.is_available():
             raise EnvironmentError("Load pretrained model to do quantization requires CUDA available.")
+        elif HPU_AVAILABLE:
+            import habana_frameworks.torch.hpu as hpu
+            if not hpu.is_available():
+                raise EnvironmentError("Load pretrained model to do quantization requires HPU available.")
 
         def skip(*args, **kwargs):
             pass
@@ -666,7 +675,8 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
             model_init_kwargs["device_map"] = None
             model_init_kwargs["low_cpu_mem_usage"] = False
 
-        torch.cuda.empty_cache()
+        if not HPU_AVAILABLE:
+            torch.cuda.empty_cache()
 
         merged_kwargs = {**model_init_kwargs, **cached_file_kwargs}
         model = AutoModelForCausalLM.from_pretrained(pretrained_model_name_or_path, **merged_kwargs)
@@ -816,7 +826,10 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
             # format marlin requires marlin kernel
             use_marlin = True
 
-        marlin_compatible = _validate_marlin_device_support()
+        if not HPU_AVAILABLE:
+            marlin_compatible = _validate_marlin_device_support()
+        else:
+            marlin_compatible = False
         if use_marlin and not MARLIN_AVAILABLE:
             raise TypeError("use_marlin is true but Marlin is not available due to cuda/device support.")
 
