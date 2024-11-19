@@ -159,15 +159,13 @@ def test_qlinear_hpu(bits, group_size, infeatures, outfeatures, bias, scales_val
         zeros = torch.full((infeatures // group_size, outfeatures), 1, dtype=torch.int32)
 
     htcore.mark_step()
+    quant_hpu.pack(linear, s.clone().detach().T, zeros.clone().detach().T, g_idx=None)
+    htcore.mark_step()
+    quant_hpu.to("hpu")
 
     quant_ref_cuda_old.pack(linear, s.clone().detach().T, zeros.clone().detach().T, g_idx=None)
     htcore.mark_step()
     quant_ref_cuda_old.to("hpu")
-
-    #TODO: pack independently
-    quant_hpu.set_packed(quant_ref_cuda_old)
-    htcore.mark_step()
-    quant_hpu.to("hpu")
 
     out_ref_cuda_old = quant_ref_cuda_old(input)
     htcore.mark_step()
